@@ -1,13 +1,12 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.tu.proyecto.hapticpulse">
-
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.BIND_WALLPAPER" />
 
     <application>
         <service
-            android:name=".MyWallpaperService"
-            android:label="Haptic Pulse Pro"
+            android:name="com.wallpaper.pro.MyWallpaperService"
+            android:label="Haptic Deep Space"
             android:permission="android.permission.BIND_WALLPAPER"
             android:exported="true">
             <intent-filter>
