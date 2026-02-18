@@ -17,11 +17,12 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
-        # Eliminamos el cache temporalmente para evitar el error inicial
-        
-    - name: Dar permisos al ejecutable Gradle
-      run: chmod +x gradlew
-      continue-on-error: true # Para que no se detenga si ya tiene permisos
 
-    - name: Compilar APK
-      run: ./gradlew assembleDebug
+    - name: Instalar Gradle Global
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: 8.2 # Aquí GitHub instala Gradle por su cuenta
+
+    - name: Compilar APK con Gradle Global
+      # Ya no usamos "./gradlew", usamos "gradle" a secas
+      run: gradle assembleDebug
