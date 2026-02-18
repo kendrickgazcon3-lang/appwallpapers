@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #020208; /* Fondo aún más oscuro para el espacio */
+        }
+        canvas {
+            display: block;
+            /* Filtros para realzar profundidad y brillo */
+            filter: saturate(150%) brightness(130%) contrast(140%);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        // Usamos webgl para efectos más complejos si es posible
+        const ctx = canvas.getContext('2d', { alpha: false }); 
+        let w, h;
+        let gravity = { x: 0, y: 0 };
+        let touch = { x: -2000, y: -2000, active: false };
+        let lightLevel = 0; // Nivel de luz para efectos
+
+        // --- Configuración de Capas ---
+        const layers = [
+            { count: 1500, sizeMin: 0.5, sizeMax: 1.5, friction: 0.96, bounce: -0.3, color: 'rgba(0, 180, 255, 0.9)', depth: 1.0 }, // Capa delantera (arena fina)
+            { count: 800, sizeMin: 1.5, sizeMax: 3.0, friction: 0.92, bounce: -0.2, color: 'rgba(0, 100, 255, 0.7)', depth: 0.7 },  // Capa media (partículas más grandes)
+            { count: 300, sizeMin: 3.0, sizeMax: 6.0, friction: 0.88, bounce: -0.1, color: 'rgba(50, 0, 255, 0.5)', depth: 0.4 }   // Capa trasera (nebulosa difusa)
+        ];
+        let allParticles = [];
+
+        function resize() {
+            w = canvas.width = window.innerWidth;
+            h = canvas.height = window.innerHeight;
+            init(); // Reiniciar todas las capas al cambiar tamaño
+        }
+        window.onresize = resize;
+
+        // --- INTERFAZ CON KOTLIN ---
+        function updateTouch(x, y) {
+            touch.x = x;
+            touch.y = y;
+            touch.active = true;
+            // Notificar a Kotlin para una vibración inicial al tocar
+            if (typeof Android !== 'undefined' && Android.vibrateHit) {
+                Android.vibrateHit(30, 200); // Vibración inicial fuerte
+            }
+        }
+        function updatePhys(gx, gy) {
+            gravity.x = -gx * 0.3; // Ajuste para efecto de profundidad
+            gravity.y = gy * 0.3;
+            // Notificar a Kotlin para vibración constante al mover el teléfono (simula arrastre)
+            // if (typeof Android !== 'undefined' && Android.vibrateDrag) {
+            //     Android.vibrateDrag(10, 80); // Vibración suave y constante
+            // }
+        }
+        function updateLight(lux) {
+            lightLevel = lux;
+            // Ajustar el brillo y la difuminación del fondo en base a la luz
+            const brightnessFactor = Math.min(lux / 100 + 0.5, 1.5);
+            document.body.style.filter = `brightness(${brightnessFactor})`;
+        }
+
+        // --- CLASE DE PARTÍCULA MULTICAPA ---
+        class LayerParticle {
+            constructor(layerConfig) {
+                this.x = Math.random() * w;
+                this.y = Math.random() * h;
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = (Math.random() - 0.5) * 2;
+                this.size = Math.random() * (layerConfig.sizeMax - layerConfig.sizeMin) + layerConfig.sizeMin;
+                this.color = layerConfig.color;
+                this.friction = layerConfig.friction;
+                this.bounce = layerConfig.bounce;
+                this.depth = layerConfig.depth; // Factor de profundidad para paralaje
+            }
+
+            update() {
+                // Paralaje: Las capas más lejanas reaccionan menos a la gravedad
+                this.vx += gravity.x * this.depth * 0.2;
+                this.vy += gravity.y * this.depth * 0.2;
+
+                // Vórtice Magnético y Atracción al tacto (más fuerte en capas cercanas)
+                if (touch.active) {
+                    let dx = touch.x - this.x;
+                    let dy = touch.y - this.y;
+                    let dist = Math.sqrt(dx*dx + dy*dy);
+                    
+                    if (dist < 400) {
+                        let force = (400 - dist) / 400 * this.depth; // La fuerza depende de la profundidad
+                        this.vx += dx * force * 0.08;
+                        this.vy += dy * force * 0.08;
+                        
+                        // Efecto de rotación (Vórtice) - más notable en capas cercanas
+                        this.vx += dy * force * 0.1 * this.depth; 
+                        this.vy -= dx * force * 0.1 * this.depth;
+                    }
+                }
+
+                this.vx *= this.friction;
+                this.vy *= this.friction;
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Colisión con Bordes (con rebote específico de cada capa)
+                if (this.x > w) { this.x = w; this.vx *= this.bounce; }
+                else if (this.x < 0) { this.x = 0; this.vx *= this.bounce; }
+                if (this.y > h) { this.y = h; this.vy *= this.bounce; }
+                else if (this.y < 0) { this.y = 0; this.vy *= this.bounce; }
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                // Sombra para dar efecto de profundidad y volumen
+                ctx.shadowColor = this.color;
+                ctx.shadowBlur = this.size * 2; // El desenfoque depende del tamaño de la partícula
+                ctx.fillRect(this.x, this.y, this.size, this.size);
+            }
+        }
+
+        // Inicializar todas las capas
+        function init() {
+            allParticles = [];
+            layers.forEach(layerConfig => {
+                for (let i = 0; i < layerConfig.count; i++) {
+                    allParticles.push(new LayerParticle(layerConfig));
+                }
+            });
+            // Ordenar partículas para que las más grandes (fondo) se dibujen primero
+            allParticles.sort((a, b) => a.depth - b.depth);
+        }
+
+        function animate() {
+            // Rastro acumulativo para simular un fluido o espacio con neblina
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = 'rgba(2, 4, 10, 0.1)'; // Menos opaco para un rastro sutil
+            ctx.fillRect(0, 0, w, h);
+
+            // Efecto de mezcla aditiva para las zonas de alta densidad (brillo)
+            ctx.globalCompositeOperation = 'lighter';
+            
+            for (let i = 0; i < allParticles.length; i++) {
+                allParticles[i].update();
+                allParticles[i].draw();
+            }
+            
+            ctx.globalCompositeOperation = 'source-over'; // Volver al modo normal
+            requestAnimationFrame(animate);
+        }
+
+        // --- Inicio ---
+        resize();
+        animate();
+
+        // Desactivar el toque después de un tiempo si no hay actividad
+        setInterval(() => { touch.active = false; touch.x = -2000; touch.y = -2000; }, 3000);
+    </script>
+</body>
+</html>
